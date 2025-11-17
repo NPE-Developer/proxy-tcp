@@ -1,2 +1,2 @@
-### MODBUS PROXY
+### TCP PROXY
 - usage: proxy.exe [host] [target]
