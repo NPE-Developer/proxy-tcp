@@ -7,6 +7,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 )
 
 func readConfig() (host, target string) {
@@ -66,22 +70,87 @@ func listener(host string, target string) error {
 
 }
 
+func scanPorts(target string, from int, to int, timeout time.Duration) []string {
+	open := []string{}
+	for i := range to - from {
+		port := strconv.Itoa(i + from)
+
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%s", target, port), timeout)
+		if err != nil {
+			continue
+		}
+		conn.Close()
+
+		fmt.Printf("found open port %s:%s\n", target, port)
+		open = append(open, port)
+	}
+
+	return open
+}
+
 func main() {
 	var host, target string
+	var timeout_ms int
 	if len(os.Args) < 3 {
 		host, target = readConfig()
 	} else {
 		host = os.Args[1]
 		target = os.Args[2]
+
+		if len(os.Args) == 4 {
+			timeout_ms, _ = strconv.Atoi(os.Args[3])
+		}
+		if timeout_ms == 0 {
+			timeout_ms = 100
+		}
 	}
 
 	if host == "" || target == "" {
-		fmt.Println("[INFO] usage: proxy.exe [host] [target]")
+		fmt.Println("[INFO] usage: proxy.exe [host] [target] [timeout_ms]")
 		fmt.Println("[INFO] or create config.json file with {host: string, target: string} value")
 		os.Exit(1)
 	}
 
-	if err := listener(host, target); err != nil {
-		log.Fatal(err)
+	if len(strings.Split(host, ":")) == 1 && len(strings.Split(target, ":")) == 1 {
+		for {
+			mut := sync.Mutex{}
+			wg := sync.WaitGroup{}
+
+			ports := []string{}
+			max_port := 49152 // well known ports (0-1023) sampai registered ports (1024-49151)
+			divided := max_port / 8
+
+			for i := range 8 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					result := scanPorts(target, i*divided, (i+1)*divided, time.Duration(timeout_ms)*time.Millisecond)
+
+					mut.Lock()
+					defer mut.Unlock()
+
+					ports = append(ports, result...)
+				}()
+			}
+			wg.Wait()
+
+			for _, port := range ports {
+				go func() {
+					for {
+						if err := listener(fmt.Sprintf("%s:%s", host, port), fmt.Sprintf("%s:%s", target, port)); err != nil {
+							fmt.Printf("[INFO ] closed proxy to %s:%s: %s\n", target, port, err.Error())
+						}
+						fmt.Printf("[INFO ] restarting proxy to %s:%s in %s\n", target, port, (3 * time.Second).String())
+						time.Sleep(3 * time.Second)
+					}
+				}()
+			}
+
+			select {}
+		}
+	} else {
+		if err := listener(host, target); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
