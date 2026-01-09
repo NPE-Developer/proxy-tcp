@@ -13,18 +13,18 @@ import (
 	"time"
 )
 
-func readConfig() (host, target string) {
+func readConfig() (host, target string, err error) {
 	bytes, err := os.ReadFile("config.json")
 	if err != nil {
-		log.Fatal("failed to read config.json file: ", err.Error())
+		return "", "", fmt.Errorf("failed to read config.json file: %s", err.Error())
 	}
 
 	var value map[string]string
 	if err := json.Unmarshal(bytes, &value); err != nil {
-		log.Fatal("failed to read config.json file: ", err.Error())
+		return "", "", fmt.Errorf("failed to read config.json file: %s", err.Error())
 	}
 
-	return value["host"], value["target"]
+	return value["host"], value["target"], nil
 }
 
 func handleConnection(conn net.Conn, target string) error {
@@ -91,8 +91,9 @@ func scanPorts(target string, from int, to int, timeout time.Duration) []string 
 func main() {
 	var host, target string
 	var timeout_ms int
+
 	if len(os.Args) < 3 {
-		host, target = readConfig()
+		host, target, _ = readConfig() // no need to handle err
 	} else {
 		host = os.Args[1]
 		target = os.Args[2]
@@ -106,8 +107,9 @@ func main() {
 	}
 
 	if host == "" || target == "" {
-		fmt.Println("[INFO] usage: proxy.exe [host] [target] [timeout_ms]")
-		fmt.Println("[INFO] or create config.json file with {host: string, target: string} value")
+		fmt.Println(`[INFO] usage: proxy.exe [host] [target] [timeout_ms]`)
+		fmt.Println(`[INFO] or create config.json file with {host: string, target: string} value`)
+		fmt.Println(`[INFO] example: "./proxy.exe 127.0.0.1:80 192.168.100.10:3000"`)
 		os.Exit(1)
 	}
 
